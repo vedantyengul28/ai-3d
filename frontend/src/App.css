@@ -1,0 +1,51 @@
+.App {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.app-container {
+  display: flex;
+  gap: 20px;
+  max-width: 1800px;
+  margin: 0 auto;
+  height: calc(100vh - 40px);
+}
+
+.left-panel {
+  flex: 1;
+  min-width: 0; /* Allows flex item to shrink below its content size */
+  background: white;
+  border-radius: 12px;
+  padding: 30px;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+}
+
+.right-panel {
+  width: 40%;
+  min-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (max-width: 1024px) {
+  .app-container {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .left-panel {
+    width: 100%;
+    min-height: 500px;
+  }
+
+  .right-panel {
+    width: 100%;
+    min-width: auto;
+  }
+}
+
+
+
+
