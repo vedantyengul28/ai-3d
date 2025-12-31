@@ -17,7 +17,10 @@ function App() {
   const fetchSessions = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:5000/api/session');
+      const API_URL = process.env.REACT_APP_API_URL;
+
+      const response = await fetch(`${API_URL}/api/session`);
+
       if (!response.ok) {
         throw new Error('Failed to fetch sessions');
       }
