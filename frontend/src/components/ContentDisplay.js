@@ -13,7 +13,7 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   loadVoices(); // Try to load immediately
 }
 
-function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, avatarType = 'male' }) {
+function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, avatarType = 'male', isLoading = false }) {
   const [isReading, setIsReading] = useState(false);
   const [currentSpeechChapter, setCurrentSpeechChapter] = useState(currentChapter);
   const synthRef = useRef(window.speechSynthesis);
@@ -167,6 +167,22 @@ function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, 
     setCurrentSpeechChapter(1);
   };
 
+  if (isLoading) {
+    return (
+      <div className="content-display">
+        <div className="loading-container">
+          <div className="loading-bar"></div>
+          <div className="loading-text">AI is preparing lesson…</div>
+          <div className="shimmer-lines">
+            <div className="line"></div>
+            <div className="line"></div>
+            <div className="line short"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!chapters || chapters.length === 0) {
     return (
       <div className="content-display">
@@ -236,4 +252,3 @@ function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, 
 }
 
 export default ContentDisplay;
-

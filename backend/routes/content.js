@@ -12,7 +12,18 @@ const genAI = process.env.GEMINI_API_KEY
 // Try multiple Gemini model candidates until one succeeds
 async function tryGenerateWithGemini(genPrompt) {
   const preferred = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : [];
-  const initialCandidates = [...new Set([...preferred, 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro'])];
+  // Expanded list of models to try, including newer and older variants to maximize success chance
+  const initialCandidates = [
+    ...new Set([
+      ...preferred,
+      'gemini-1.5-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-pro',
+      'gemini-1.5-pro-latest',
+      'gemini-1.0-pro',
+      'gemini-pro'
+    ])
+  ];
 
   // Try initial candidates first
   for (const m of initialCandidates) {
@@ -22,6 +33,7 @@ async function tryGenerateWithGemini(genPrompt) {
       const result = await model.generateContent(genPrompt);
       const response = await result.response;
       const text = response.text();
+      if (!text) throw new Error('Empty response from model');
       console.log(`Gemini model ${m} succeeded`);
       return text;
     } catch (err) {
@@ -157,23 +169,55 @@ function createFallbackChapters(topic) {
     {
       chapterNumber: 1,
       title: `Introduction to ${t}`,
-      content: `This is a concise overview of ${t}. It outlines main ideas and objectives to provide learners with a clear starting point.`
+      content: `Welcome to the comprehensive course on ${t}. \n\nIn this initial module, we will explore the fundamental concepts, historical context, and significance of ${t}. This overview sets the stage for a deeper dive into specific areas.\n\nKey discussion points:\n- Origins and definition of ${t}\n- Importance in the modern context\n- Brief historical timeline`
     },
     {
       chapterNumber: 2,
-      title: `Core Concepts of ${t}`,
-      content: `This chapter covers the essential concepts of ${t} with simple explanations and illustrative examples.`
+      title: `Core Principles and Fundamentals`,
+      content: `Let's examine the core principles that define ${t}. \n\nUnderstanding these foundational elements is crucial. We will look at:\n\n1. Primary definitions and scope\n2. Major theoretical frameworks\n3. Critical components and their interactions\n\nMastering these basics will provide a solid platform for advanced study.`
     },
     {
       chapterNumber: 3,
-      title: `Practical Applications & Next Steps`,
-      content: `This chapter suggests practical uses, exercises, and further reading to continue learning about ${t}.`
+      title: `Advanced Concepts in ${t}`,
+      content: `Moving beyond the basics, this chapter delves into the complex nuances of ${t}. We will explore advanced methodologies, theoretical paradoxes, and high-level strategies used by experts in the field.`
+    },
+    {
+      chapterNumber: 4,
+      title: `Tools, Technologies, and Ecosystem`,
+      content: `What tools drive ${t}? This chapter surveys the technological landscape, including software, hardware, and frameworks that support ${t}. We'll discuss how to select the right tools for different scenarios.`
+    },
+    {
+      chapterNumber: 5,
+      title: `Real-world Applications and Case Studies`,
+      content: `How is ${t} applied in the real world? \n\nThis chapter covers practical applications across different industries and scenarios. We'll analyze case studies to see how theoretical knowledge translates into tangible results.`
+    },
+    {
+      chapterNumber: 6,
+      title: `Best Practices and Methodologies`,
+      content: `Success in ${t} requires following established best practices. We will outline industry standards, optimized workflows, and quality assurance measures to ensure high outcomes.`
+    },
+    {
+      chapterNumber: 7,
+      title: `Challenges, Risks, and Solutions`,
+      content: `Every field faces challenges, and ${t} is no exception. \n\nWe will discuss current limitations, ethical considerations, common pitfalls, and effective mitigation strategies.`
+    },
+    {
+      chapterNumber: 8,
+      title: `Future Trends and Innovations`,
+      content: `What lies ahead for ${t}? We will predict future trends, emerging technologies, and how the landscape might evolve over the next decade.`
+    },
+    {
+      chapterNumber: 9,
+      title: `Conclusion and Next Steps`,
+      content: `To wrap up our session on ${t}, let's review the key takeaways. \n\nWe've covered the basics, applications, and future trends. Continue exploring this fascinating topic through further reading and practice exercises.`
     }
   ];
 } 
 
 // Generate chapter-wise content
 router.post('/generate', async (req, res) => {
+  let session = null;
+
   try {
     const { topic, sessionId } = req.body;
 
@@ -182,7 +226,7 @@ router.post('/generate', async (req, res) => {
     }
 
     // Check if session exists
-    let session = await Session.findOne({ sessionId });
+    session = await Session.findOne({ sessionId });
     
     if (!session) {
       // Create new session
@@ -213,7 +257,7 @@ router.post('/generate', async (req, res) => {
     }
 
     // Generate content using OpenAI - ChatGPT style comprehensive response
-    const prompt = `Imagine someone asked ChatGPT: "Tell me everything about ${topic}". Generate that complete, comprehensive response, but split it into 5-7 detailed chapters.
+    const prompt = `Imagine someone asked ChatGPT: "Tell me everything about ${topic}". Generate that complete, comprehensive response, but split it into 8-12 detailed chapters.
 
 Generate chapters exactly as ChatGPT would respond - covering ALL information about "${topic}":
 - Everything you know about this topic
@@ -232,12 +276,14 @@ Generate chapters exactly as ChatGPT would respond - covering ALL information ab
 
 Each chapter should be 1000-1500 words of comprehensive content. Write naturally like ChatGPT - thorough, detailed, complete.
 
+IMPORTANT: Chapter titles must be specific to the topic, NOT generic like "Introduction" or "Conclusion". Use descriptive, engaging titles.
+
 Format as JSON:
 {
   "chapters": [
     {
       "chapterNumber": 1,
-      "title": "Chapter Title",
+      "title": "Specific Descriptive Title",
       "content": "Full comprehensive chapter content (1000-1500 words) covering all aspects..."
     }
   ]
@@ -538,80 +584,53 @@ Format as JSON:
     });
   } catch (error) {
     console.error('Error generating content:', error);
-    console.error('Error details:', error.message);
-    console.error('Error status:', error.status);
-    console.error('Error code:', error.code);
 
-    // If all tried Gemini models failed, try a Wikipedia fallback so users still get content
-    if (error.message && error.message.includes('All tried Gemini models failed')) {
-      console.warn('Provider models failed — attempting Wikipedia fallback for topic:', req.body?.topic);
+    // FINAL FALLBACK STRATEGY:
+    // If Gemini fails, try Wikipedia.
+    // If Wikipedia fails, use static fallback.
+    // ALWAYS return content to the frontend, never a 500 error for content generation.
+
+    let fallbackChapters = [];
+    let fallbackSource = 'static';
+    let warningMsg = 'AI generation unavailable. Showing basic overview.';
+
+    try {
+      console.warn('Attempting Wikipedia fallback for topic:', req.body?.topic);
+      fallbackChapters = await fetchWikipediaChapters(req.body?.topic || 'the topic');
+      if (fallbackChapters.length > 0) {
+        fallbackSource = 'wikipedia';
+        warningMsg = 'AI service unavailable; content sourced from Wikipedia.';
+      } else {
+        throw new Error('Wikipedia returned no chapters');
+      }
+    } catch (wikiErr) {
+      console.error('Wikipedia fallback failed:', wikiErr.message);
+      // Use static fallback
+      fallbackChapters = createFallbackChapters(req.body?.topic);
+      warningMsg = 'AI and external sources unavailable. Showing basic structure.';
+    }
+
+    // Save fallback content to session
+    if (session) {
+      session.chapters = fallbackChapters;
+      session.totalChapters = fallbackChapters.length;
+      session.currentChapter = 1;
+      session.progress = Math.round((1 / fallbackChapters.length) * 100);
       try {
-        const wikiChapters = await fetchWikipediaChapters(req.body?.topic || 'the topic');
-        session.chapters = wikiChapters;
-        session.totalChapters = wikiChapters.length;
-        session.currentChapter = 1;
-        session.progress = Math.round((1 / wikiChapters.length) * 100);
         await session.save();
-
-        return res.json({
-          sessionId: session.sessionId,
-          chapters: wikiChapters,
-          currentChapter: session.currentChapter,
-          totalChapters: session.totalChapters,
-          progress: session.progress,
-          usedFallback: 'wikipedia',
-          warning: 'Gemini models were unavailable; used Wikipedia fallback content.'
-        });
-      } catch (wikiErr) {
-        console.error('Wikipedia fallback failed:', wikiErr.message || wikiErr);
-        // continue to other error handling below
+      } catch (saveError) {
+        console.error('Failed to save session with fallback:', saveError.message);
       }
     }
 
-    // Handle specific error cases
-    if (error.message && error.message.toLowerCase().includes('expired')) {
-      return res.status(401).json({
-        error: 'API key expired',
-        message: 'Your Gemini API key has expired. Renew or create a new API key at https://makersuite.google.com/app/apikey and update backend/.env',
-        details: error.message,
-        code: 'api_key_expired'
-      });
-    }
-
-    if (error.message && (error.message.includes('API_KEY_INVALID') || error.message.includes('401'))) {
-      return res.status(401).json({ 
-        error: 'Invalid API key', 
-        message: 'Your Gemini API key is invalid. Please check your .env file.',
-        details: 'Get a free API key at https://makersuite.google.com/app/apikey',
-        code: 'invalid_api_key'
-      });
-    }
-    
-    if (error.message && (error.message.includes('quota') || error.message.includes('Quota') || error.message.includes('429'))) {
-      return res.status(429).json({ 
-        error: 'API quota exceeded', 
-        message: 'Your Gemini API quota has been exceeded. Please try again later or check your API usage.',
-        details: error.message,
-        code: 'quota_exceeded'
-      });
-    }
-    
-    if (error.message && error.message.includes('404') && error.message.includes('model')) {
-      return res.status(500).json({ 
-        error: 'Model not found', 
-        message: 'The Gemini model is not available. Please check the model name in the code.',
-        details: error.message,
-        code: 'model_not_found',
-        hint: 'Try using gemini-1.5-flash or gemini-1.5-pro'
-      });
-    }
-    
-    // Return the actual error so user knows what went wrong
-    return res.status(500).json({ 
-      error: 'Failed to generate content', 
-      message: error.message || 'Unknown error occurred',
-      details: 'Please check your Gemini API key configuration and ensure the model is available',
-      code: error.code || 'unknown_error'
+    return res.json({
+      sessionId: session ? session.sessionId : (req.body?.sessionId || 'unknown'),
+      chapters: fallbackChapters,
+      currentChapter: 1,
+      totalChapters: fallbackChapters.length,
+      progress: Math.round((1 / fallbackChapters.length) * 100),
+      usedFallback: fallbackSource,
+      warning: warningMsg
     });
   }
 });

@@ -1,51 +1,348 @@
-.App {
+/* =========================
+   GLOBAL RESET & THEME
+========================= */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --primary-gradient: linear-gradient(135deg, #6a5cff, #8b7cff);
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --text-primary: #ffffff;
+  --text-secondary: #b8b8ff;
+  --accent-color: #6a5cff;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  background: radial-gradient(circle at top,
+      #1b1f3b 0%,
+      #0b0d1a 40%,
+      #060711 100%);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+/* =========================
+   APP LAYOUT
+========================= */
+.app-root {
   min-height: 100vh;
-  padding: 20px;
-}
-
-.app-container {
   display: flex;
-  gap: 20px;
-  max-width: 1800px;
-  margin: 0 auto;
-  height: calc(100vh - 40px);
+    flex-direction: column;
+  }
+  
+  .main-layout {
+    flex: 1;
+    display: grid;
+    /* Left Panel (Fixed), Center (Fluid), Right Panel (Fixed) */
+    grid-template-columns: 320px 1fr 300px;
+    gap: 24px;
+    padding: 30px 40px;
+    max-width: 1920px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  
+  /* =========================
+     GLASS PANELS
+  ========================= */
+  .glass {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 24px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+  }
+  
+  /* =========================
+     LEFT SIDEBAR (Topic, Gender, Progress)
+  ========================= */
+  .side-panel.left {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+    padding: 30px;
+    height: fit-content;
+    position: sticky;
+    top: 30px;
+  }
+  
+  .panel-title {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+    margin-bottom: 15px;
+    font-weight: 600;
+  }
+  
+  /* Gender Selection Styles */
+  .gender-selection-container {
+    display: flex;
+    flex-direction: column;
 }
 
-.left-panel {
+.gender-toggle {
+  display: flex;
+  background: rgba(0, 0, 0, 0.2);
+    padding: 4px;
+    border-radius: 12px;
+    gap: 4px;
+}
+
+.gender-btn {
   flex: 1;
-  min-width: 0; /* Allows flex item to shrink below its content size */
-  background: white;
-  border-radius: 12px;
-  padding: 30px;
-  overflow-y: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+    font-size: 14px;
+  }
+  
+  .gender-btn:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.05);
+  }
+  
+  .gender-btn.active {
+    background: var(--primary-gradient);
+    color: white;
+    box-shadow: 0 4px 15px rgba(106, 92, 255, 0.3);
+    font-weight: 600;
+  }
+  
+  .gender-btn span {
+    font-size: 18px;
+  }
+  
+  /* =========================
+     CENTER PANEL (Content)
+  ========================= */
+  .center-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    /* Contains scroll */
+    min-height: 80vh;
+  }
+  
+  /* =========================
+     RIGHT SIDEBAR (Avatar)
+  ========================= */
+  .side-panel.right {
+    position: relative;
+    /* Context for sticky child */
 }
 
-.right-panel {
-  width: 40%;
-  min-width: 400px;
+.sticky-avatar-container {
+  position: sticky;
+  top: 30px;
+  height: fit-content;
   display: flex;
   flex-direction: column;
-  gap: 20px;
 }
 
-@media (max-width: 1024px) {
-  .app-container {
-    flex-direction: column;
-    height: auto;
+.avatar-glass-wrapper {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    position: relative;
+    overflow: hidden;
+    animation: slowFloat 8s ease-in-out infinite;
+  }
+  
+  /* Glow Effect */
+  .avatar-glass-wrapper::before {
+    content: '';
+    position: absolute;
+    width: 150%;
+    height: 150%;
+    background: radial-gradient(circle, rgba(106, 92, 255, 0.15) 0%, transparent 60%);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 0;
+    pointer-events: none;
+  }
+  
+  .avatar-status {
+    margin-top: 15px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    z-index: 1;
+  }
+  
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #00e676;
+    border-radius: 50%;
+    box-shadow: 0 0 10px #00e676;
+    animation: pulse-dot 2s infinite;
+  }
+  
+  @keyframes pulse-dot {
+    0% {
+      opacity: 1;
+    }
+  
+    50% {
+      opacity: 0.5;
+    }
+  
+    100% {
+      opacity: 1;
+    }
+  }
+  
+  @keyframes slowFloat {
+    0% {
+      transform: translateY(0px);
+    }
+  
+    50% {
+      transform: translateY(-6px);
+    }
+  
+    100% {
+      transform: translateY(0px);
+    }
+  }
+  
+  /* =========================
+     NAVBAR (Preserved & Enhanced)
+  ========================= */
+  .top-navbar {
+    height: 70px;
+    padding: 0 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--glass-border);
+    z-index: 100;
+  }
+  
+  .logo {
+    font-size: 22px;
+    font-weight: 800;
+    background: linear-gradient(to right, #fff, #b8b8ff);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+  }
+  
+  .nav-actions {
+    display: flex;
+    gap: 12px;
+  }
+  
+  .nav-btn {
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: 500;
+  }
+  
+  .nav-btn.ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--glass-border);
+  }
+  
+  .nav-btn.ghost:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: white;
+  }
+  
+  .nav-btn.primary {
+    background: var(--primary-gradient);
+    border: none;
+    color: #fff;
+    box-shadow: 0 0 20px rgba(106, 92, 255, 0.3);
+  }
+  
+  .nav-btn.primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 25px rgba(106, 92, 255, 0.5);
+  }
+  
+  /* =========================
+     SCROLLBAR
+  ========================= */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
   }
 
-  .left-panel {
-    width: 100%;
-    min-height: 500px;
-  }
-
-  .right-panel {
-    width: 100%;
-    min-width: auto;
-  }
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
+/* =========================
+   RESPONSIVE
+========================= */
+@media (max-width: 1200px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+    padding: 20px;
+  }
+    .side-panel.left {
+      position: static;
+      order: 1;
+      /* Move below avatar on mobile if desired, or top */
+  
 
+    /* Requirement: Avatar moves to top on mobile */
+    .side-panel.right {
+      order: 0;
+    }
+  
+    .center-panel {
+      order: 2;
+    }
 
+    .sticky-avatar-container {
+      position: relative;
+      top: 0;
+    }
 
+    .avatar-glass-wrapper {
+      min-height: 300px;
+    }
+}
+}

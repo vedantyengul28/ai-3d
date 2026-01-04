@@ -86,20 +86,6 @@ function Avatar3D({ avatarType, onAvatarChange }) {
 
   return (
     <div className="avatar-container">
-      <div className="avatar-selector">
-        <button
-          className={`avatar-button ${avatarType === 'male' ? 'active' : ''}`}
-          onClick={() => onAvatarChange('male')}
-        >
-          Male
-        </button>
-        <button
-          className={`avatar-button ${avatarType === 'female' ? 'active' : ''}`}
-          onClick={() => onAvatarChange('female')}
-        >
-          Female
-        </button>
-      </div>
       <div className="avatar-canvas-container">
         {/* Teacher framing: camera positioned close to face, centered on upper body */}
         <Canvas camera={{ position: [0, 1.8, 3.5], fov: 20 }}>
