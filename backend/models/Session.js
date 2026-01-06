@@ -6,6 +6,10 @@ const sessionSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  userEmail: {
+    type: String,
+    required: false
+  },
   topic: {
     type: String,
     required: true
@@ -21,7 +25,11 @@ const sessionSchema = new mongoose.Schema({
   chapters: [{
     chapterNumber: Number,
     content: String,
-    title: String
+    title: String,
+    sections: [{
+      sectionTitle: String,
+      content: String
+    }]
   }],
   restartCount: {
     type: Number,

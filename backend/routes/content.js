@@ -107,119 +107,13 @@ async function tryGenerateWithGemini(genPrompt) {
   throw new Error('All tried Gemini models failed.');
 }
 
-// Fetch Wikipedia content and split it into chapters as a fallback when Gemini fails
-async function fetchWikipediaChapters(topic) {
-  if (!topic || !topic.trim()) throw new Error('No topic provided for Wikipedia fallback');
-
-  // 1) Search for the best matching page title
-  const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(topic)}&format=json&utf8=1&srprop=`;
-  const sRes = await fetch(searchUrl);
-  if (!sRes.ok) throw new Error('Wikipedia search failed');
-  const sJson = await sRes.json();
-  const title = sJson?.query?.search?.[0]?.title;
-  if (!title) throw new Error('No matching Wikipedia page found');
-
-  // 2) Get the plain text extract for the page (includes sections)
-  const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&exsectionformat=plain&titles=${encodeURIComponent(title)}&format=json&utf8=1&redirects=1`;
-  const eRes = await fetch(extractUrl);
-  if (!eRes.ok) throw new Error('Wikipedia extract fetch failed');
-  const eJson = await eRes.json();
-  const pages = eJson?.query?.pages;
-  if (!pages) throw new Error('No page extract available');
-  const page = pages[Object.keys(pages)[0]];
-  const text = (page && page.extract) ? page.extract : '';
-  if (!text || text.trim().length === 0) throw new Error('Empty Wikipedia page content');
-
-  // 3) Split into paragraphs and chunk into 5 chapters (or fewer if content short)
-  const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-  const targetChapters = Math.min(5, Math.max(1, Math.ceil(paras.length / Math.ceil(paras.length / 3))));
-  const per = Math.ceil(paras.length / targetChapters) || 1;
-  const chapters = [];
-  for (let i = 0; i < targetChapters; i++) {
-    const slice = paras.slice(i * per, (i + 1) * per);
-    const content = slice.join('\n\n');
-    if (content) {
-      chapters.push({
-        chapterNumber: chapters.length + 1,
-        title: i === 0 ? `Introduction to ${title}` : `Chapter ${chapters.length + 1}`,
-        content
-      });
-    }
-  }
-
-  // If not enough paragraph split, create at least 3 short chapters from the text
-  if (chapters.length === 0 && text) {
-    const words = text.split(/\s+/);
-    const chunkSize = Math.ceil(words.length / 3);
-    for (let i = 0; i < 3; i++) {
-      const start = i * chunkSize;
-      const part = words.slice(start, start + chunkSize).join(' ');
-      if (part) {
-        chapters.push({ chapterNumber: chapters.length + 1, title: `Chapter ${chapters.length + 1}`, content: part });
-      }
-    }
-  }
-
-  return chapters;
-}
-
-function createFallbackChapters(topic) {
-  const t = topic || 'the topic';
-  return [
-    {
-      chapterNumber: 1,
-      title: `Introduction to ${t}`,
-      content: `Welcome to the comprehensive course on ${t}. \n\nIn this initial module, we will explore the fundamental concepts, historical context, and significance of ${t}. This overview sets the stage for a deeper dive into specific areas.\n\nKey discussion points:\n- Origins and definition of ${t}\n- Importance in the modern context\n- Brief historical timeline`
-    },
-    {
-      chapterNumber: 2,
-      title: `Core Principles and Fundamentals`,
-      content: `Let's examine the core principles that define ${t}. \n\nUnderstanding these foundational elements is crucial. We will look at:\n\n1. Primary definitions and scope\n2. Major theoretical frameworks\n3. Critical components and their interactions\n\nMastering these basics will provide a solid platform for advanced study.`
-    },
-    {
-      chapterNumber: 3,
-      title: `Advanced Concepts in ${t}`,
-      content: `Moving beyond the basics, this chapter delves into the complex nuances of ${t}. We will explore advanced methodologies, theoretical paradoxes, and high-level strategies used by experts in the field.`
-    },
-    {
-      chapterNumber: 4,
-      title: `Tools, Technologies, and Ecosystem`,
-      content: `What tools drive ${t}? This chapter surveys the technological landscape, including software, hardware, and frameworks that support ${t}. We'll discuss how to select the right tools for different scenarios.`
-    },
-    {
-      chapterNumber: 5,
-      title: `Real-world Applications and Case Studies`,
-      content: `How is ${t} applied in the real world? \n\nThis chapter covers practical applications across different industries and scenarios. We'll analyze case studies to see how theoretical knowledge translates into tangible results.`
-    },
-    {
-      chapterNumber: 6,
-      title: `Best Practices and Methodologies`,
-      content: `Success in ${t} requires following established best practices. We will outline industry standards, optimized workflows, and quality assurance measures to ensure high outcomes.`
-    },
-    {
-      chapterNumber: 7,
-      title: `Challenges, Risks, and Solutions`,
-      content: `Every field faces challenges, and ${t} is no exception. \n\nWe will discuss current limitations, ethical considerations, common pitfalls, and effective mitigation strategies.`
-    },
-    {
-      chapterNumber: 8,
-      title: `Future Trends and Innovations`,
-      content: `What lies ahead for ${t}? We will predict future trends, emerging technologies, and how the landscape might evolve over the next decade.`
-    },
-    {
-      chapterNumber: 9,
-      title: `Conclusion and Next Steps`,
-      content: `To wrap up our session on ${t}, let's review the key takeaways. \n\nWe've covered the basics, applications, and future trends. Continue exploring this fascinating topic through further reading and practice exercises.`
-    }
-  ];
-} 
-
 // Generate chapter-wise content
 router.post('/generate', async (req, res) => {
   let session = null;
 
   try {
     const { topic, sessionId } = req.body;
+    const userEmail = req.user?.email || req.body?.userEmail || req.headers["x-user-email"] || "anonymous@aiva.ai";
 
     if (!topic) {
       return res.status(400).json({ error: 'Topic is required' });
@@ -232,59 +126,61 @@ router.post('/generate', async (req, res) => {
       // Create new session
       session = new Session({
         sessionId: sessionId || `session_${Date.now()}`,
-        topic
+        topic,
+        userEmail
       });
     }
 
-    // If Gemini API key is not configured, return a safe fallback immediately
+    // If Gemini API key is not configured, return an error immediately (Strict Requirement)
     if (!process.env.GEMINI_API_KEY || !genAI) {
-      console.warn('Gemini API key not configured; returning fallback content.');
-      const fallback = createFallbackChapters(topic);
-      session.chapters = fallback;
-      session.totalChapters = fallback.length;
-      session.currentChapter = 1;
-      session.progress = Math.round((1 / fallback.length) * 100);
-      await session.save();
-      return res.json({
-        sessionId: session.sessionId,
-        chapters: fallback,
-        currentChapter: session.currentChapter,
-        totalChapters: session.totalChapters,
-        progress: session.progress,
-        usedFallback: true,
-        warning: 'Gemini API key not configured. Get a free API key at https://makersuite.google.com/app/apikey'
+      console.error('Gemini API key not configured.');
+      return res.status(500).json({
+        error: 'AI service not configured. Please contact support.' 
       });
     }
 
-    // Generate content using OpenAI - ChatGPT style comprehensive response
-    const prompt = `Imagine someone asked ChatGPT: "Tell me everything about ${topic}". Generate that complete, comprehensive response, but split it into 8-12 detailed chapters.
+    // Generate content using the new prompt structure
+    // RESTORED: Dynamic chapter and section generation based on topic complexity (User Requirement)
+    const prompt = `You are an AI tutor for a learning platform.
+For the topic: "${topic}", generate content in a well-structured educational format.
 
-Generate chapters exactly as ChatGPT would respond - covering ALL information about "${topic}":
-- Everything you know about this topic
-- Definitions, explanations, history, background
-- All concepts, principles, theories, methodologies
-- Types, variations, categories
-- Applications, use cases, real-world examples
-- Case studies, success stories
-- Tools, technologies, resources
-- Best practices, tips, tricks
-- Common mistakes, challenges, solutions
-- Benefits, advantages, limitations
-- Comparisons with related topics
-- Current state, trends, future outlook
-- Everything else relevant to the topic
+STRICTLY follow this structure:
+Topic
+→ Chapters (if applicable)
+→ Each chapter MUST contain one or more SECTIONS (depending on complexity)
 
-Each chapter should be 1000-1500 words of comprehensive content. Write naturally like ChatGPT - thorough, detailed, complete.
+Each section should:
+- Cover ONLY ONE clear concept
+- Be short (5–8 lines max)
+- Be understandable for a student
+- Stop naturally (do NOT continue endlessly)
 
-IMPORTANT: Chapter titles must be specific to the topic, NOT generic like "Introduction" or "Conclusion". Use descriptive, engaging titles.
+Each section must include:
+1. Section title
+2. Section explanation
+3. (Optional) Example or short analogy
 
-Format as JSON:
+IMPORTANT RULES:
+- Do NOT merge all content into one section
+- Do NOT generate a single long paragraph
+- Always generate at least 3–6 sections per chapter
+- Assume the content will be spoken using text-to-speech, so pauses between sections are required
+- Do NOT include greetings, conclusions, or summaries unless asked
+- Generate 5-8 chapters for this topic.
+
+Output FORMAT (JSON only, no extra text):
+
 {
+  "topic": "${topic}",
   "chapters": [
     {
-      "chapterNumber": 1,
-      "title": "Specific Descriptive Title",
-      "content": "Full comprehensive chapter content (1000-1500 words) covering all aspects..."
+      "chapterTitle": "<chapter_title>",
+      "sections": [
+        {
+          "sectionTitle": "<section_title>",
+          "content": "<clear explanation>"
+        }
+      ]
     }
   ]
 }`;
@@ -296,10 +192,10 @@ Format as JSON:
     const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
     console.log('Preferred Gemini model (config):', GEMINI_MODEL);
 
-    const fullPrompt = `You are an expert AI assistant like ChatGPT. When users ask about any topic, you provide comprehensive, detailed, complete answers covering EVERYTHING about that topic. You don't give brief summaries - you explain thoroughly with all details, examples, history, concepts, applications, use cases, and related information.\n\n${prompt}\n\nCRITICAL JSON FORMATTING RULES:\n- Respond with ONLY valid JSON (no markdown, no code blocks, no extra text)\n- All special characters in strings MUST be properly escaped:\n  * Newlines must be \\n (not actual newlines)\n  * Quotes must be \\" (not actual quotes)\n  * Backslashes must be \\\\ (double backslashes)\n  * Tabs must be \\t\n- Do NOT include markdown formatting like **bold** or # headers\n- The JSON must be valid and parseable\n\nRequired JSON format:\n{\n  "chapters": [\n    {\n      "chapterNumber": 1,\n      "title": "Chapter Title",\n      "content": "Full comprehensive chapter content (1000-1500 words) with all special characters properly escaped..."\n    }\n  ]\n}`;
+    const fullPrompt = `You are an expert AI tutor. Respond with valid JSON only.\n\n${prompt}`;
 
     // Try configured model first, then fall back to commonly available Gemini models
-    responseContent = await tryGenerateWithGemini(fullPrompt);
+    const responseContent = await tryGenerateWithGemini(fullPrompt);
 
     console.log('Gemini response received, length:', responseContent?.length);
     
@@ -319,117 +215,7 @@ Format as JSON:
     }
     
     let generatedContent;
-    
-    // Function to extract and rebuild JSON properly
-    function repairJson(jsonString) {
-      try {
-        // Try direct parse first
-        return JSON.parse(jsonString);
-      } catch (e) {
-        // If that fails, manually extract chapters and rebuild
-        const chapters = [];
-        
-        // Find all chapter objects using a more flexible approach
-        // Look for: {"chapterNumber": X, "title": "...", "content": "..."}
-        let chapterStart = -1;
-        let depth = 0;
-        let inString = false;
-        let escaped = false;
-        let contentFieldStart = -1;
-        let contentValue = '';
-        let currentChapter = {};
-        
-        for (let i = 0; i < jsonString.length; i++) {
-          const char = jsonString[i];
-          
-          if (escaped) {
-            if (contentFieldStart !== -1) {
-              contentValue += char;
-            }
-            escaped = false;
-            continue;
-          }
-          
-          if (char === '\\') {
-            escaped = true;
-            if (contentFieldStart !== -1) {
-              contentValue += char;
-            }
-            continue;
-          }
-          
-          if (char === '"') {
-            inString = !inString;
-            continue;
-          }
-          
-          if (!inString) {
-            if (char === '{') {
-              if (depth === 0) {
-                chapterStart = i;
-                currentChapter = {};
-              }
-              depth++;
-            } else if (char === '}') {
-              depth--;
-              if (depth === 0 && chapterStart !== -1) {
-                // End of chapter object
-                if (contentFieldStart !== -1) {
-                  // Save the content (we've been collecting it)
-                  currentChapter.content = contentValue;
-                  contentFieldStart = -1;
-                  contentValue = '';
-                }
-                if (currentChapter.chapterNumber && currentChapter.title && currentChapter.content) {
-                  chapters.push({
-                    chapterNumber: currentChapter.chapterNumber,
-                    title: currentChapter.title,
-                    content: currentChapter.content
-                  });
-                }
-                chapterStart = -1;
-                currentChapter = {};
-              }
-            } else if (char === ':' && jsonString.substring(Math.max(0, i-20), i).includes('"content"')) {
-              // Found content field - start collecting its value
-              contentFieldStart = i + 1;
-              // Skip to the opening quote
-              while (i < jsonString.length && jsonString[i] !== '"') i++;
-              if (jsonString[i] === '"') {
-                inString = true;
-                i++; // Skip the opening quote
-                contentValue = '';
-              }
-            } else if (char === ':' && jsonString.substring(Math.max(0, i-20), i).includes('"title"')) {
-              // Extract title
-              let titleStart = jsonString.indexOf('"', i) + 1;
-              let titleEnd = titleStart;
-              while (titleEnd < jsonString.length && (jsonString[titleEnd] !== '"' || jsonString[titleEnd-1] === '\\')) {
-                titleEnd++;
-              }
-              currentChapter.title = jsonString.substring(titleStart, titleEnd).replace(/\\"/g, '"').replace(/\\n/g, '\n');
-            } else if (char === ':' && jsonString.substring(Math.max(0, i-30), i).includes('"chapterNumber"')) {
-              // Extract chapter number
-              let numStart = i + 1;
-              let numEnd = numStart;
-              while (numEnd < jsonString.length && /[\d]/.test(jsonString[numEnd])) numEnd++;
-              currentChapter.chapterNumber = parseInt(jsonString.substring(numStart, numEnd));
-            }
-          } else {
-            // Inside a string
-            if (contentFieldStart !== -1) {
-              contentValue += char;
-            }
-          }
-        }
-        
-        if (chapters.length > 0) {
-          return { chapters };
-        }
-        throw e;
-      }
-    }
-    
+
     try {
       // First attempt: direct parse
       generatedContent = JSON.parse(cleanedContent);
@@ -443,141 +229,52 @@ Format as JSON:
         generatedContent = JSON.parse(repairedJson);
         console.log('Successfully parsed after using jsonrepair library');
       } catch (secondParseError) {
-        // Third attempt: Manual extraction using regex with proper handling
-        try {
-          console.log('Trying manual chapter extraction...');
-          
-          // Extract chapters by finding chapter objects one by one
-          const chapters = [];
-          let searchStart = 0;
-          
-          // Pattern to find chapter start
-          const chapterStartPattern = /\{\s*"chapterNumber"\s*:\s*(\d+)/g;
-          let match;
-          
-          while ((match = chapterStartPattern.exec(cleanedContent)) !== null) {
-            const chapterStart = match.index;
-            const chapterNum = parseInt(match[1]);
-            
-            // Find the title
-            const titleMatch = cleanedContent.substring(chapterStart).match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-            if (!titleMatch) continue;
-            const title = titleMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n');
-            
-            // Find the content - this is tricky because it might have unescaped characters
-            const contentMatch = cleanedContent.substring(chapterStart).match(/"content"\s*:\s*"/);
-            if (!contentMatch) continue;
-            
-            const contentStartPos = chapterStart + contentMatch.index + contentMatch[0].length;
-            // Now find where the content ends (closing quote followed by comma or })
-            let contentEndPos = contentStartPos;
-            let escaped = false;
-            
-            while (contentEndPos < cleanedContent.length) {
-              const char = cleanedContent[contentEndPos];
-              
-              if (escaped) {
-                escaped = false;
-                contentEndPos++;
-                continue;
-              }
-              
-              if (char === '\\') {
-                escaped = true;
-                contentEndPos++;
-                continue;
-              }
-              
-              if (char === '"') {
-                // Check if this is the end of content
-                const after = cleanedContent.substring(contentEndPos + 1).trim();
-                if (after.startsWith(',') || after.startsWith('}')) {
-                  break;
-                }
-              }
-              
-              contentEndPos++;
-            }
-            
-            const rawContent = cleanedContent.substring(contentStartPos, contentEndPos);
-            // Clean up the content - remove escape sequences
-            let content = rawContent
-              .replace(/\\n/g, '\n')
-              .replace(/\\r/g, '\r')
-              .replace(/\\t/g, '\t')
-              .replace(/\\"/g, '"')
-              .replace(/\\\\/g, '\\');
-            
-            chapters.push({
-              chapterNumber: chapterNum,
-              title: title,
-              content: content
-            });
-          }
-          
-          if (chapters.length > 0) {
-            generatedContent = { chapters };
-            console.log(`Successfully extracted ${chapters.length} chapters manually`);
-          } else {
-            throw new Error('No chapters found');
-          }
-        } catch (thirdParseError) {
-          console.error('All JSON parsing attempts failed');
-          console.error('Parse error:', parseError.message);
-          console.error('Error position:', parseError.message.match(/position (\d+)/)?.[1] || 'unknown');
-          
-          // Last resort: try to use Wikipedia fallback
-          console.log('Attempting Wikipedia fallback due to JSON parsing failure...');
-          try {
-            const wikiChapters = await fetchWikipediaChapters(topic);
-            session.chapters = wikiChapters;
-            session.totalChapters = wikiChapters.length;
-            session.currentChapter = 1;
-            session.progress = Math.round((1 / wikiChapters.length) * 100);
-            await session.save();
-            
-            return res.json({
-              sessionId: session.sessionId,
-              chapters: wikiChapters,
-              currentChapter: session.currentChapter,
-              totalChapters: session.totalChapters,
-              progress: session.progress,
-              usedFallback: 'wikipedia',
-              warning: 'Gemini JSON parsing failed; used Wikipedia fallback content.'
-            });
-          } catch (wikiErr) {
-            return res.status(500).json({ 
-              error: 'Failed to parse AI response', 
-              details: parseError.message,
-              hint: 'The AI response contains invalid JSON that could not be repaired. Please try generating content again.'
-            });
-          }
-        }
+        console.error('All JSON parsing attempts failed');
+        // Fallback to Wikipedia
+        throw new Error('JSON parsing failed');
       }
     }
-    
+
     // Validate generated content
     if (!generatedContent.chapters || !Array.isArray(generatedContent.chapters) || generatedContent.chapters.length === 0) {
       console.error('Gemini returned invalid content structure');
-      console.error('Generated content:', JSON.stringify(generatedContent, null, 2));
-      return res.status(500).json({ 
-        error: 'Invalid content structure received from Gemini',
-        details: 'The AI response did not contain valid chapters array'
-      });
+      throw new Error('Invalid content structure');
     }
-    
+
     console.log(`Successfully generated ${generatedContent.chapters.length} chapters using Gemini`);
-    
+
+    // Map to DB structure and flatten content for fallback/compatibility
+    const chapters = generatedContent.chapters.map((ch, index) => {
+      // Handle "sections" if present, otherwise assume it might be old format or just content
+      const sections = ch.sections || [];
+      const title = ch.chapterTitle || ch.title || `Chapter ${index + 1}`;
+
+      // Create a flattened content string for legacy compatibility or full-text search
+      let flatContent = '';
+      if (sections.length > 0) {
+        flatContent = sections.map(s => `### ${s.sectionTitle}\n\n${s.content}`).join('\n\n');
+      } else if (ch.content) {
+        flatContent = ch.content;
+      }
+
+      return {
+        chapterNumber: index + 1,
+        title: title,
+        sections: sections,
+        content: flatContent
+      };
+    });
+
     // Update session with generated chapters
-    session.chapters = generatedContent.chapters;
-    session.totalChapters = generatedContent.chapters.length;
+    session.chapters = chapters;
+    session.totalChapters = chapters.length;
     session.currentChapter = 1;
-    session.progress = Math.round((1 / generatedContent.chapters.length) * 100);
+    session.progress = Math.round((1 / chapters.length) * 100);
     await session.save();
 
     res.json({
       sessionId: session.sessionId,
-      chapters: generatedContent.chapters,
+      chapters: chapters,
       currentChapter: session.currentChapter,
       totalChapters: session.totalChapters,
       progress: session.progress
@@ -586,51 +283,12 @@ Format as JSON:
     console.error('Error generating content:', error);
 
     // FINAL FALLBACK STRATEGY:
-    // If Gemini fails, try Wikipedia.
-    // If Wikipedia fails, use static fallback.
-    // ALWAYS return content to the frontend, never a 500 error for content generation.
-
-    let fallbackChapters = [];
-    let fallbackSource = 'static';
-    let warningMsg = 'AI generation unavailable. Showing basic overview.';
-
-    try {
-      console.warn('Attempting Wikipedia fallback for topic:', req.body?.topic);
-      fallbackChapters = await fetchWikipediaChapters(req.body?.topic || 'the topic');
-      if (fallbackChapters.length > 0) {
-        fallbackSource = 'wikipedia';
-        warningMsg = 'AI service unavailable; content sourced from Wikipedia.';
-      } else {
-        throw new Error('Wikipedia returned no chapters');
-      }
-    } catch (wikiErr) {
-      console.error('Wikipedia fallback failed:', wikiErr.message);
-      // Use static fallback
-      fallbackChapters = createFallbackChapters(req.body?.topic);
-      warningMsg = 'AI and external sources unavailable. Showing basic structure.';
-    }
-
-    // Save fallback content to session
-    if (session) {
-      session.chapters = fallbackChapters;
-      session.totalChapters = fallbackChapters.length;
-      session.currentChapter = 1;
-      session.progress = Math.round((1 / fallbackChapters.length) * 100);
-      try {
-        await session.save();
-      } catch (saveError) {
-        console.error('Failed to save session with fallback:', saveError.message);
-      }
-    }
-
-    return res.json({
-      sessionId: session ? session.sessionId : (req.body?.sessionId || 'unknown'),
-      chapters: fallbackChapters,
-      currentChapter: 1,
-      totalChapters: fallbackChapters.length,
-      progress: Math.round((1 / fallbackChapters.length) * 100),
-      usedFallback: fallbackSource,
-      warning: warningMsg
+    // If Gemini fails, we throw an error as per strict requirements.
+    // No Wikipedia fallback allowed.
+    console.error('Gemini generation failed:', error);
+    return res.status(500).json({
+      error: 'Failed to generate content. Please try again later.',
+      details: error.message 
     });
   }
 });
@@ -661,5 +319,3 @@ router.get('/:sessionId', async (req, res) => {
 });
 
 module.exports = router;
-
-

@@ -70,7 +70,7 @@ router.get('/:sessionId', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const sessions = await Session.find({})
-      .select('sessionId topic progress restartCount backCount currentChapter totalChapters createdAt updatedAt')
+      .select('sessionId userEmail topic progress restartCount backCount currentChapter totalChapters createdAt updatedAt')
       .sort({ updatedAt: -1 });
 
     res.json(sessions);
