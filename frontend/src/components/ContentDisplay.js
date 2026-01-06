@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import './ContentDisplay.css';
 
 // Load voices when available
@@ -15,7 +15,7 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
 
 function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, avatarType = 'male', isLoading = false }) {
   const [isReading, setIsReading] = useState(false);
-  const [currentSpeechChapter, setCurrentSpeechChapter] = useState(currentChapter);
+  const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const synthRef = useRef(window.speechSynthesis);
   const utteranceRef = useRef(null);
 
@@ -58,60 +58,104 @@ function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, 
     setIsReading(false);
   }, []);
 
-  const startReadingFromChapter = useCallback((chapterNum) => {
-    if (!chapters || !Array.isArray(chapters) || chapters.length === 0) return;
-    if (chapterNum < 1 || chapterNum > chapters.length) return;
+  const currentChapterData = chapters && chapters[currentChapter - 1] ? chapters[currentChapter - 1] : null;
 
-    const chapter = chapters[chapterNum - 1];
-    if (!chapter) return;
-
-    const textToRead = `Chapter ${chapterNum}: ${chapter.title}. ${chapter.content}`;
-
-    if (synthRef.current.speaking) {
-      synthRef.current.cancel();
+  const sections = useMemo(() => {
+    // Priority 1: Use structured sections from backend if available
+    if (currentChapterData && Array.isArray(currentChapterData.sections) && currentChapterData.sections.length > 0) {
+      return currentChapterData.sections.map((s, idx) => ({
+        title: s.sectionTitle || s.title || `Section ${idx + 1}`,
+        text: s.content || s.text || ''
+      }));
     }
 
-    // Ensure voices are loaded before setting voice
+    // Priority 2: Parse legacy flat content
+    const out = [];
+    if (!currentChapterData || !currentChapterData.content) return out;
+    const content = String(currentChapterData.content);
+    const lines = content.split(/\r?\n/);
+    const headerMap = {
+      definition: 'Definition',
+      explanation: 'Explanation',
+      example: 'Example',
+      keypoints: 'Key Points'
+    };
+    let current = null;
+    lines.forEach(l => {
+      const line = l.trim();
+      if (!line) {
+        if (current) current.text += '\n\n';
+        return;
+      }
+      const lower = line.toLowerCase();
+      if (lower.startsWith('definition')) {
+        current = { title: headerMap.definition, text: '' };
+        out.push(current);
+        return;
+      }
+      if (lower.startsWith('explanation')) {
+        current = { title: headerMap.explanation, text: '' };
+        out.push(current);
+        return;
+      }
+      if (lower.startsWith('example')) {
+        current = { title: headerMap.example, text: '' };
+        out.push(current);
+        return;
+      }
+      if (lower.startsWith('key points') || lower.startsWith('keypoints') || lower.startsWith('key point')) {
+        current = { title: headerMap.keypoints, text: '' };
+        out.push(current);
+        return;
+      }
+      if (!current) {
+        current = { title: headerMap.definition, text: '' };
+        out.push(current);
+      }
+      current.text += (current.text ? '\n' : '') + line;
+    });
+    if (out.length === 0) {
+      const paras = content.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+      const titles = [headerMap.definition, headerMap.explanation, headerMap.example, headerMap.keypoints];
+      paras.forEach((p, idx) => {
+        const title = titles[Math.min(idx, titles.length - 1)];
+        out.push({ title, text: p });
+      });
+    }
+    return out;
+  }, [currentChapterData]);
+
+  useEffect(() => {
+    setCurrentSectionIndex(0);
+    setIsReading(false);
+    if (synthRef.current.speaking) synthRef.current.cancel();
+  }, [currentChapter]);
+
+  const speakText = useCallback((text, preface) => {
+    if (!text) return;
+    if (synthRef.current.speaking) synthRef.current.cancel();
+
     const setupUtterance = () => {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length === 0) {
-        // Voices not loaded yet, wait and try again
         setTimeout(setupUtterance, 100);
         return;
       }
 
-      const utterance = new SpeechSynthesisUtterance(textToRead);
+      const utterance = new SpeechSynthesisUtterance(preface ? `${preface} ${text}` : text);
       utterance.rate = 0.9;
-      utterance.pitch = avatarType === 'female' ? 1.1 : 1.0; // Higher pitch for female
+      utterance.pitch = avatarType === 'female' ? 1.1 : 1.0;
       utterance.volume = 1;
-      
-      // Set voice based on avatar type
       const selectedVoice = getVoice();
       if (selectedVoice) {
         utterance.voice = selectedVoice;
       }
 
       utterance.onend = () => {
-        // Automatically move to next chapter
-        if (chapterNum < chapters.length) {
-          setCurrentSpeechChapter(chapterNum + 1);
-          onChapterChange(chapterNum + 1, false, false);
-          setTimeout(() => {
-            startReadingFromChapter(chapterNum + 1);
-          }, 500);
-        } else {
-          setIsReading(false);
-          // Restart from chapter 1 if reached the end
-          setTimeout(() => {
-            setCurrentSpeechChapter(1);
-            onChapterChange(1, true, false);
-            startReadingFromChapter(1);
-          }, 1000);
-        }
+        setIsReading(false);
       };
 
       utterance.onerror = (event) => {
-        // Ignore "interrupted" errors as they're expected when canceling speech
         if (event.error !== 'interrupted') {
           console.error('Speech synthesis error:', event.error, event);
           setIsReading(false);
@@ -124,10 +168,9 @@ function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, 
     };
     
     setupUtterance();
-  }, [chapters, onChapterChange, avatarType, getVoice]);
+  }, [avatarType, getVoice]);
 
   useEffect(() => {
-    // Cleanup on unmount
     return () => {
       if (synthRef.current.speaking) {
         synthRef.current.cancel();
@@ -135,19 +178,16 @@ function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, 
     };
   }, []);
 
-  // Update current speech chapter display when currentChapter changes
-  // Note: We don't auto-restart reading here to avoid interrupting speech
-  // The onend handler in startReadingFromChapter manages chapter progression
-  useEffect(() => {
-    setCurrentSpeechChapter(currentChapter);
-  }, [currentChapter]);
+  const playSection = () => {
+    const section = sections[currentSectionIndex];
+    if (!section) return;
+    const preface = `Section ${currentSectionIndex + 1}: ${section.title}.`;
+    speakText(section.text, preface);
+  };
 
-  const startReading = () => {
-    if (!chapters || !Array.isArray(chapters) || chapters.length === 0) return;
-    // Always start reading from chapter 1 when user clicks "Start Reading"
-    setCurrentSpeechChapter(1);
-    onChapterChange(1, true, false);
-    startReadingFromChapter(1);
+  const replaySection = () => {
+    stopReading();
+    setTimeout(() => playSection(), 200);
   };
 
   const goToNextChapter = () => {
@@ -162,9 +202,20 @@ function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, 
     }
   };
 
-  const restartFromChapter1 = () => {
-    onChapterChange(1, true, false);
-    setCurrentSpeechChapter(1);
+  const nextSection = () => {
+    if (currentSectionIndex < sections.length - 1) {
+      setCurrentSectionIndex(currentSectionIndex + 1);
+      setIsReading(false);
+      if (synthRef.current.speaking) synthRef.current.cancel();
+    }
+  };
+
+  const prevSection = () => {
+    if (currentSectionIndex > 0) {
+      setCurrentSectionIndex(currentSectionIndex - 1);
+      setIsReading(false);
+      if (synthRef.current.speaking) synthRef.current.cancel();
+    }
   };
 
   if (isLoading) {
@@ -194,12 +245,13 @@ function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, 
     );
   }
 
-  const currentChapterData = chapters[currentChapter - 1];
+  const section = sections[currentSectionIndex];
+  const chapterTitle = currentChapterData?.title || currentChapterData?.chapterTitle || `Chapter ${currentChapter}`;
 
   return (
     <div className="content-display">
       <div className="content-header">
-        <h1>{currentChapterData?.title || `Chapter ${currentChapter}`}</h1>
+        <h1>{chapterTitle}</h1>
         <div className="chapter-navigation">
           <button
             onClick={goToPreviousChapter}
@@ -221,30 +273,49 @@ function ContentDisplay({ chapters, currentChapter, onChapterChange, sessionId, 
         </div>
       </div>
 
+      <div className="section-header">
+        <div className="section-title">{section ? section.title : 'Section'}</div>
+        <div className="section-progress">Section {Math.min(currentSectionIndex + 1, sections.length)} of {sections.length || 0}</div>
+      </div>
+
       <div className="content-controls">
         <button
-          onClick={isReading ? stopReading : startReading}
+          onClick={isReading ? stopReading : playSection}
           className={`control-button ${isReading ? 'stop' : 'play'}`}
         >
-          {isReading ? '⏸ Stop Reading' : '▶ Start Reading'}
+          {isReading ? '⏸ Stop Reading' : '▶ Play Section'}
         </button>
         <button
-          onClick={restartFromChapter1}
+          onClick={replaySection}
           className="control-button restart"
         >
-          🔄 Restart from Chapter 1
+          � Replay Section
+        </button>
+        <button
+          onClick={prevSection}
+          disabled={currentSectionIndex === 0}
+          className="control-button nav-button"
+        >
+          ← Previous Section
+        </button>
+        <button
+          onClick={nextSection}
+          disabled={currentSectionIndex >= sections.length - 1}
+          className="control-button nav-button"
+        >
+          Next Section →
         </button>
       </div>
 
       <div className="content-body">
         <div className="chapter-content">
-          {currentChapterData?.content || 'Loading...'}
+          {section ? section.text : (currentChapterData?.content || 'Loading...')}
         </div>
       </div>
 
       {isReading && (
         <div className="reading-indicator">
-          <span className="pulse">🔊 Reading Chapter {currentSpeechChapter}...</span>
+          <span className="pulse">🔊 Reading Section {currentSectionIndex + 1}: {section ? section.title : ''}</span>
         </div>
       )}
     </div>

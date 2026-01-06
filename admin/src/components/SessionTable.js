@@ -34,7 +34,7 @@ function SessionTable({ sessions }) {
         <tbody>
           {sessions.map((session) => (
             <tr key={session.sessionId}>
-              <td className="session-id">{session.sessionId}</td>
+              <td className="user-email">{session.userEmail || 'Unknown User'}</td>
               <td className="topic">{session.topic}</td>
               <td>
                 <div className="progress-cell">

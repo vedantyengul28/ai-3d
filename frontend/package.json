@@ -7,8 +7,11 @@
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
     "axios": "^1.6.2",
+    "firebase": "^12.7.0",
+    "framer-motion": "^12.24.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-router-dom": "^7.11.0",
     "react-scripts": "5.0.1",
     "three": "^0.182.0",
     "three-mesh-bvh": "^0.9.4"
@@ -37,6 +40,3 @@
     ]
   }
 }
-
-
-
